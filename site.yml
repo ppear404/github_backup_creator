@@ -1,0 +1,131 @@
+---
+- name: Deploy GitHub backup
+  hosts: github_backup
+  become: true
+  vars_files: []
+  tasks:
+    - name: Verify required secrets are supplied
+      ansible.builtin.assert:
+        that:
+          - github_token is defined
+          - restic_password is defined
+          - github_owner != 'CHANGE_ME'
+        fail_msg: "Set github_owner and provide github_token/restic_password using Ansible Vault"
+      no_log: true
+
+    - name: Install backup packages
+      ansible.builtin.package:
+        name: "{{ ['git', 'git-lfs', 'restic', 'python3', 'nfs-utils'] if backup_nas_type == 'nfs' else ['git', 'git-lfs', 'restic', 'python3', 'cifs-utils'] }}"
+        state: present
+
+    - name: Create service user
+      ansible.builtin.user:
+        name: githubbackup
+        system: true
+        create_home: true
+        home: /var/lib/github-backup
+        shell: /sbin/nologin
+
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner | default('githubbackup') }}"
+        group: "{{ item.group | default('githubbackup') }}"
+        mode: "{{ item.mode | default('0700') }}"
+      loop:
+        - { path: /etc/github-backup, owner: root, group: githubbackup, mode: '0750' }
+        - { path: /var/lib/github-backup/mirrors }
+        - { path: /var/lib/github-backup/status }
+        - { path: "{{ backup_nas_mount }}", owner: root, group: root, mode: '0755' }
+
+    - name: Write CIFS credentials
+      ansible.builtin.copy:
+        dest: /etc/github-backup/nas.credentials
+        content: "username={{ nas_username }}\npassword={{ nas_password }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+      when: backup_nas_type == 'cifs'
+      no_log: true
+
+    - name: Get backup UID
+      ansible.builtin.command: id -u githubbackup
+      register: backup_uid
+      changed_when: false
+
+    - name: Get backup GID
+      ansible.builtin.command: id -g githubbackup
+      register: backup_gid
+      changed_when: false
+
+    - name: Mount NAS via fstab
+      ansible.posix.mount:
+        path: "{{ backup_nas_mount }}"
+        src: "{{ backup_nas_source }}"
+        fstype: "{{ 'nfs4' if backup_nas_type == 'nfs' else 'cifs' }}"
+        opts: "{{ backup_nas_options if backup_nas_type == 'nfs' else 'credentials=/etc/github-backup/nas.credentials,uid=' ~ backup_uid.stdout ~ ',gid=' ~ backup_gid.stdout ~ ',file_mode=0600,dir_mode=0700,_netdev,nofail,x-systemd.automount' }}"
+        state: mounted
+      # uid/gid values needed for CIFS; NFS permissions controlled by NAS
+
+    - name: Write backup environment secrets
+      ansible.builtin.copy:
+        dest: /etc/github-backup/backup.env
+        content: |
+          GH_TOKEN={{ github_token | quote }}
+          RESTIC_PASSWORD={{ restic_password | quote }}
+          GITHUB_OWNER={{ github_owner | quote }}
+          BACKUP_CACHE={{ backup_cache_dir | quote }}
+          RETENTION_DAILY={{ backup_retention_daily }}
+          RETENTION_WEEKLY={{ backup_retention_weekly }}
+          RETENTION_MONTHLY={{ backup_retention_monthly }}
+          RESTIC_REPOSITORY={{ (backup_nas_mount ~ '/restic') | quote }}
+        owner: root
+        group: githubbackup
+        mode: '0640'
+      no_log: true
+
+    - name: Install backup program
+      ansible.builtin.copy:
+        src: files/github_backup.py
+        dest: /usr/local/libexec/github_backup.py
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install runner
+      ansible.builtin.copy:
+        src: files/backup-runner.sh
+        dest: /usr/local/sbin/github-backup-runner
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install systemd units
+      ansible.builtin.template:
+        src: "templates/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        mode: '0644'
+      loop:
+        - github-backup.service
+        - github-backup.timer
+        - github-backup-maintenance.service
+        - github-backup-maintenance.timer
+      notify: Reload systemd
+
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable timers
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - github-backup.timer
+        - github-backup-maintenance.timer
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

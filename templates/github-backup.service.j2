@@ -1,0 +1,19 @@
+[Unit]
+Description=GitHub mirror and Restic backup
+Wants=network-online.target
+After=network-online.target remote-fs.target
+RequiresMountsFor={{ backup_nas_mount }}
+[Service]
+Type=oneshot
+User=githubbackup
+Group=githubbackup
+EnvironmentFile=/etc/github-backup/backup.env
+ExecStart=/usr/local/sbin/github-backup-runner backup
+TimeoutStartSec=12h
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/github-backup {{ backup_nas_mount }}
+[Install]
+WantedBy=multi-user.target

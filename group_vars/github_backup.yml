@@ -1,0 +1,12 @@
+---
+github_owner: "CHANGE_ME"
+backup_nas_type: nfs  # nfs or cifs
+backup_nas_source: "nas.example.net:/export/backups" # CIFS: //nas.example.net/backups
+backup_nas_mount: /mnt/github-backups
+backup_nas_options: "rw,_netdev,nofail,x-systemd.automount" # NFS defaults
+backup_cache_dir: /var/lib/github-backup/mirrors
+backup_retention_daily: 7
+backup_retention_weekly: 4
+backup_retention_monthly: 12
+# Supply github_token and restic_password using Ansible Vault or extra-vars.
+# For CIFS: supply nas_username and nas_password using Vault.

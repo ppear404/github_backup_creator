@@ -1,0 +1,8 @@
+[Unit]
+Description=Weekly Restic retention and integrity check
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+Unit=github-backup-maintenance.service
+[Install]
+WantedBy=timers.target

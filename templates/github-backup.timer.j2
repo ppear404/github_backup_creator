@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly GitHub backup
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=5m
+Unit=github-backup.service
+[Install]
+WantedBy=timers.target

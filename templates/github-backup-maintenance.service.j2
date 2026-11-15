@@ -1,0 +1,17 @@
+[Unit]
+Description=Restic retention and integrity check
+Wants=network-online.target
+After=network-online.target remote-fs.target
+RequiresMountsFor={{ backup_nas_mount }}
+[Service]
+Type=oneshot
+User=githubbackup
+Group=githubbackup
+EnvironmentFile=/etc/github-backup/backup.env
+ExecStart=/usr/local/sbin/github-backup-runner maintenance
+TimeoutStartSec=24h
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/github-backup {{ backup_nas_mount }}
